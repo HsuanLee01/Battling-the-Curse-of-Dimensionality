@@ -1,0 +1,243 @@
+---
+title: "Practical 1"
+author: "Hsuan Lee"
+output: html_document
+---
+# 1 Introduction
+
+In this practical, we will deal with the curse of dimensionality by applying the “bet on sparsity”. We will use the following packages in the process:
+```{r}
+library(tidyverse)
+library(glmnet)
+```
+
+Create a practical folder with an .Rproj file (e.g., practical_01.Rproj) and a data folder inside. Download the prepared files below and put them in the data folder in your project directory.
+
+- gene_expressions.rds
+- phenotypes.rds
+
+# 2 Take home exercises
+
+**2.1 Gene expression data**
+
+The data file we will be working with is gene expression data. Using microarrays, the expression of many genes can be measured at the same time. The data file contains expressions for 54675 genes with IDs such as `1007_s_at`, `202896_s_at`, `AFFX-r2-P1-cre-3_at`. (NB: these IDs are specific for this type of chip and need to be converted to actual gene names before they can be looked up in a database such as “GeneCards”). The values in the data file are related to the amount of RNA belonging to each gene found in the tissue sample.
+
+The goal of the study for which this data was collected is one of exploratory cancer classification: are there differences in gene expression between tissue samples of human prostates with and without prostate cancer?
+
+*1. Read the data file gene_expressions.rds using read_rds(). What are the dimensions of the data? What is the sample size?*
+```{r}
+gene <- read_rds("data/gene_expressions.rds")
+dim(gene) # check the dimension
+```
+
+The data has 237 rows and 54676 columns, which means that the sample size is 237 with 54676 variables.
+
+*2. As always, visualisation is a good idea. Create histograms of the first 6 variables. Describe what you notice.*
+```{r}
+gene[, 2:7] %>%
+  pivot_longer(where(is.numeric)) %>%
+  ggplot(aes(x = value)) +
+  geom_histogram(bins = 30) +
+  facet_wrap(~name, scales = "free") +
+  scale_color_brewer(palette) +
+  scale_fill_brewer(palette) +
+  theme_minimal()
+```
+
+*3. We now only have the gene expression data, but the labels are in the file phenotypes.rds. Load that file, select() the relevant columns for classification into normal and tumor tissue, and join() it with the gene expression data, based on the tissue identifier in the sample column. Give the resulting dataset a good name!*
+```{r}
+pheno <- read_rds(file = "data/phenotypes.rds")
+```
+
+```{r}
+gene <- pheno %>%
+  select(sample, disease) %>%
+  right_join(gene)
+```
+
+Can also use this:
+```{r}
+#pheno <- read_rds(file = "data/phenotypes.rds") %>%
+  #select(c("sample", "disease")) %>% 
+  #mutate(disease = as_factor(disease))
+
+#gene <- left_join(gene_expressions, phenotypes, by = "sample")
+```
+
+*4. Does this dataset suffer from class imbalance?*
+```{r}
+table(gene$disease)
+```
+
+The dataset is evenly distributed.
+
+*5. Split the data into a training (80%) and a test set (20%). We will use the training set for model development in the next section.*
+```{r}
+set.seed(9252568)
+
+gene <- gene[sample(nrow(gene)),]
+train <- seq(1, nrow(gene) * 0.8)
+test <- seq(max(train) + 1, nrow(gene))
+
+gene_train <- gene[train,]
+gene_test <- gene[test,]
+```
+
+# 3 Lab exercises
+
+**3.1 Correlation filter & logistic regression**
+
+In this section, we will perform class prediction with this dataset using filtering and logistic regression. For the model development parts, use the training dataset.
+
+*6. Use a correlation filter to find the IDs of the 10 genes that are most related to disease status.*
+```{r}
+# make the outcome as numeric
+gene_train_FS <- gene_train %>% #FS means features selection method
+  mutate(disease_num = ifelse(disease == "normal", 0, 1))
+```
+
+```{r}
+# remove the outcome variable in the data
+gene_train_cor <- gene_train_FS %>%
+  select(-sample, -disease, -disease_num)
+```
+
+```{r}
+# compute the correlation between each variable and outcome
+correlation <- 1
+for (variable in 1:ncol(gene_train_cor)) {
+  correlation[variable] <- cor(gene_train_cor[,variable],gene_train_FS$disease_num)
+}
+```
+
+```{r}
+# reordering the column -> put DVs and unused variable in to the first few columns
+gene_train.DV <- gene_train_FS %>%
+  select(sample, disease, disease_num)
+
+gene_train_FS <- cbind(gene_train.DV, gene_train_cor)
+
+# arrange the correlation from large correlation to low correlation
+correlation <- data.frame(correlation = abs(correlation), 
+                          order = 4:(ncol(gene_train_FS)))
+
+correlation <- correlation %>%
+  arrange(-correlation)
+```
+
+```{r}
+# takes the top 10 most correlated variable
+top10_cor <- correlation[1:10,2]
+gene_train_FS<- gene_train_FS[,top10_cor]
+gene_train_FS <- cbind(disease = as.factor(gene_train.DV$disease), gene_train_FS)
+```
+
+*7. Perform logistic regression, predicting the outcome using the selected genes. Name the fitted object fit_lr.*
+```{r}
+fit_lr <- glm(formula = disease ~ ., family = "binomial", data = gene_train_FS)
+
+summary(fit_lr)
+```
+
+*8. Create a confusion matrix for the predictions of this model on the test set. What is the accuracy of this model?*
+```{r}
+pred_test <- predict(fit_lr, newdata = gene_test, type = "response")
+pred_test <- ifelse(pred_test > 0.5, "Yes", "No")
+
+# confusion matrix
+table(true = gene_test$disease, pred_test)
+```
+
+```{r}
+# accuracy
+(24+22)/nrow(gene_test)
+```
+
+The accuracy is 0.958.
+
+**3.2 Regularized regression**
+
+In this section, we will use the glmnet package to perform LASSO regression, which will automatically set certain coefficients to 0. The first step in performing LASSO regression is to prepare the data in the correct format. Read the help file of glmnet() to figure out what the x and y inputs should be.
+
+*9. Prepare your data for input into glmnet. Create x_train, y_train, x_test, and y_test.*
+```{r}
+x_train <- gene_train %>%
+  select(-disease, -sample)
+x_train <- as.matrix(x_train)
+
+y_train <- gene_train %>%
+  select(disease)
+y_train <- as.matrix(y_train)
+
+x_test <- gene_test %>%
+  select(-disease, -sample)
+x_test <- as.matrix(x_test)
+
+y_test <- gene_test %>%
+  select(disease)
+y_test <- as.matrix(y_test)
+```
+
+*10. Use the glmnet function to fit a LASSO regression. Use the plot() function on the fitted model and describe what you see.*
+```{r}
+??glmnet
+model_1_lasso <- glmnet(x = x_train, # x should be matrix
+                        y = y_train, # y should be matrix
+                        family = "binomial",
+                        # lasso penalty
+                        alpha = 1)
+
+plot(model_1_lasso)
+```
+
+From the plot, the x-axis represents the total number of parameters of the model; the y-axis represents the parameter values; the top is the number of non-zero parameters; each line implies that a parameter fluctuates along the total number of parameters of the model.
+
+The next step is finding the right penalization parameter λ. In other words, we need to tune this hyperparameter. We want to select the hyperparameter which yields the best out-of-sample prediction performance. We could do this by further splitting the training dataset into a train and development subset, or with cross-validation. In this case, we will use the built-in cross-validation function of the glmnet package: cv.glmnet.
+
+*11. Run cv.glmnet for your dataset. Run the plot() function on the resulting object. Explain in your own words what you see.*
+
+NB: Do not forget to set family = "binomial" to ensure that you are running logistic regression.
+```{r}
+model_2_lasso <- cv.glmnet(x = x_train,
+                           y = y_train,
+                           family = "binomial",
+                           nfolds = 5)
+
+plot(model_2_lasso)
+```
+
+The x axis is the log of the lambda; the y axis is the binomial deviance; the top is the number of non-zero parameters. With the increase of the log of lamda the binomial deviance rises as well, the variance decrease. With the decrease of the log of lambda, the binomial deviance reduces, the variance increase.
+
+The range between the dashed line indicates the location of the best model, the left dashed line gives us the optimal lambda, the right dashed line gives us the larger lambda, but the simplest model.
+
+*12. Inspect the nonzero coefficients of the model with the lowest out-of-sample deviance. Hint: use the coef() function, and make sure to use the right value for the s argument to that function. Do you see overlap between the correlation filter selections and the LASSO results?*
+```{r}
+# extract the parameters with the lowest lambda
+lowest_lam_coef <- coef(model_2_lasso, s = "lambda.min")
+
+# indices of the non-zero parameters
+nonzero_par <- which(lowest_lam_coef[,1] != 0)
+
+# show the non_zero parameters
+lowest_lam_coef[nonzero_par,]
+
+# check if there is the overlap between lasso and correlation filter
+intersect(names(gene_train_FS), names(lowest_lam_coef[nonzero_par,]))
+```
+
+Four variables are overlaped.
+
+*13. Use the predict() function on the fitted cv.glmnet object to predict disease status for the test set based on the optimized lambda value. Create a confusion matrix and compare this with the logistic regression model we made earlier in terms of accuracy.*
+```{r}
+pred_test_lasso <- predict(model_2_lasso, newx = x_test, s = "lambda.min", type = "response")
+pred_test_lasso <- ifelse(pred_test_lasso > 0.5, "Yes", "No")
+
+table(true = gene_test$disease, predicted = pred_test_lasso)
+```
+
+```{r}
+# accuracy
+(24+22) / nrow(gene_test)
+```
+
+The accuracy is 0.958, which is actually the same as the correlation filter one.
