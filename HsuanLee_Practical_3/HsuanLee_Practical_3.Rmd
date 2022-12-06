@@ -1,0 +1,196 @@
+---
+title: "Practical 3"
+author: "Hsuan Lee"
+output: pdf_document
+---
+
+# 1. Take home exercise
+
+The data to be analyzed in this exercise can be found in the following file.
+
+- `GBMobility.txt`
+
+The data in this file constitute a contingency table of counts, the classic 1949 Great Britain five-by-five son’s by father’s occupational mobility table. Import the data into R. The warning message that might show up in using the function read.table() can be ignored.
+```{r}
+X <- read.table("data/GBMobility.txt")
+```
+
+The rows of the data table correspond to five different categories of father’s occupation and the columns to the same five different categories of son’s occupation. The cells in the main diagonal of the table refer to fathers and sons with the same occupational category, and this group is important because it measures the total amount of mobility exhibited by the sons. The categories for both nominal variables are:
+
+1. upper nonmanual (UN; self-employed professionals, salaried professionals, managers, nonretail salespersons)
+
+2. lower nonmanual (LN; proprietors, clerical workers, retail salespersons)
+
+3. upper manual (UM; manufacturing craftsmen, other craftsmen, construction crafts- men)
+
+4. lower manual (LM; service workers, other operatives, manufacturing operatives, ma- nufacturing laborers, other laborers)
+
+5. farm (F; farmers and farm managers, farm laborers)
+
+If the table is called X, then the row and column labels can be assigned by executing
+```{r}
+rownames(X) <- c('UN F','LN F','UM F','LM F','F F')
+colnames(X) <- c('UN S','LN S','UM S','LM S','F S')
+```
+
+Obtain the correspondence table using the function prop.table(). Use the function sum() to check whether the sum of all elements of the correspondence table equals one. The matrix of row profiles can be obtained by using the argument margin = 1 in the function prop.table() and the matrix of column profiles by using the argument margin = 2. Use the functions rowSums() and colSums() to check whether the sums of the profiles are all equal to one. Install and load the R package ggpubr and execute ggballoonplot(X, fill ='value').
+```{r}
+# make the data as matrix
+X <- as.matrix(X)
+
+# check if the sum of all elements of the correspondence table is 1
+sum(prop.table(X))
+
+# check the row sum = 1 or not
+rowSums(prop.table(X, margin = 1))
+
+# check the column sum = 1 or not
+colSums(prop.table(X, margin = 2))
+```
+
+To visualize the correspondence table using a balloon plot. One of the R packages for correspondence analysis is ca. Install and load this package.
+```{r}
+library(ca)
+library(ggpubr)
+```
+
+```{r}
+ggballoonplot(X, fill ='value')
+```
+
+**1. Apply a correspondence analysis to the GB mobility table. The function to be used is ca().**
+```{r}
+cor_ana <- ca(X)
+```
+
+**2: Explore the arguments and values of the function ca() using ?ca. Obtain the row and column standard coordinates.**
+```{r}
+#?ca
+
+# row standard coordinates
+cor_ana$rowcoord
+
+# column standard coordinates
+cor_ana$colcoord
+```
+
+**3. Use the function summary() to determine the proportion of total inertia explained by the first two extracted dimensions.**
+```{r}
+summary(cor_ana)
+```
+
+94.5% of total inertia explained by the first two extracted dimensions.
+
+**4. Use the function plot() to obtain a symmetric map.**
+```{r}
+plot(cor_ana, map = "symmetric")
+```
+
+**5. Use the argument map='rowprincipal' to obtain an asymmetric map with principal coordinates for rows and standard coordinates for columns.**
+```{r}
+plot(cor_ana, map = "rowprincipal")
+```
+
+# Part 2: Lab exericse
+
+For the lab exercises, you will use the file
+
+- `EcoActivity.txt`
+
+This data contains a two-way contingency table that can be used to analyze economic activity of the Polish population in relation to gender and level of education in the second quarter of 2011. The rows of the table refer to different levels of education, that is:
+
+1. tertiary (E1),
+
+2. post-secondary (E2),
+
+3. secondary (E3),
+
+4. general secondary (E4),
+
+5. basic vocational (E5),
+
+6. lower secondary, primary and incomplete primary (E6).
+
+The columns refer to the levels:
+
+1. full-time employed females (A1F),
+
+2. part-time employed females (A2F),
+
+3. unemployed females (A3F),
+
+4. economically inactive females (A4F),
+
+5. full-time employed males (A1M),
+
+6. part-time employed males (A2M),
+
+7. unemployed males (A3M),
+
+8. economically inactive males (A4M).
+
+Import the data into R and respond to the following items.
+```{r}
+EcoActivity <- read.table("data/EcoActivity.txt")
+```
+
+**6. Give the rows 1 to 6 the labels E1 to E6, respectively. Give the columns 1 to 4 the labels A1F to A4F, and the columns 5 to 8 the labels A1M to A4M, respectively. Give a visualization of the correspondence matrix.**
+```{r}
+rownames(EcoActivity) <- c('E1', 'E2', 'E3', 'E4', 'E5', 'E6')
+colnames(EcoActivity) <- c('A1F', 'A2F','A3F', 'A4F', 'A1M', 'A2M', 'A3M', 'A4M')
+
+cor_mat <- prop.table(EcoActivity)
+ggballoonplot(cor_mat, fill = 'value')
+```
+
+**7. Give the proportion of full-time employed females with secondary level of education.**
+```{r}
+cor_mat[3, 1]
+```
+
+```{r}
+cor_mat
+```
+
+**8. Give the matrices of row profiles and column profiles.**
+```{r}
+EcoActivity <- as.matrix(EcoActivity)
+
+(row_pro <- prop.table(EcoActivity, margin = 1))
+rowSums(row_pro)
+
+(col_pro <- prop.table(EcoActivity, margin = 2))
+colSums(col_pro)
+```
+
+**9. What is the conditional proportion of full-time employed females given tertiary level of education and what is the conditional proportion of full-time employed males given tertiary level of education?**
+```{r}
+row_pro[1, 1]
+row_pro[1, 5]
+```
+
+**10. What is the conditional proportion of females with the lowest level of education given economically inactive? What is the conditonal proportion of males with the lowest level of education given economically inactive?**
+```{r}
+col_pro[6, 4]
+col_pro[6, 8]
+```
+
+**11. Apply a correspondence analysis to the data. How large is the total inertia?**
+```{r}
+cor_ana.2 <- ca(EcoActivity)
+
+# total inertia
+sum(cor_ana.2$rowinertia)
+```
+
+The total inertia is 0.24.
+
+**12. Set the desired minimum proportion of explained inertia to .85. How many underlying dimensions are sufficient? What is the proportion of inertia explained by this number of dimensions?**
+```{r}
+summary(cor_ana.2)
+```
+
+**13. Give the symmetric map for the final solution.**
+```{r}
+plot(cor_ana.2)
+```

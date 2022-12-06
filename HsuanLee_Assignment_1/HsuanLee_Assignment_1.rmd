@@ -1,0 +1,148 @@
+---
+title: "Assignment 1"
+author: "Hsuan Lee"
+output: pdf_document
+---
+
+# 1 Partial least squares
+
+```{r include=FALSE}
+options(scipen = 999)
+library(tidyverse)
+library(pls) # for partial least squares model
+library(glmnet) # for lasso model
+```
+
+**1. Download the `corn` data and store it in your assignment folder.**
+```{r}
+corn <- readRDS("data/corn.RDS")
+```
+
+First, let us check the data.
+```{r}
+head(corn) # for the first six row
+tail(corn) # for the last six rows
+
+# check the dimentionality
+dim(corn)
+```
+
+The dataset has 80 rows and 704 columns, which means that there are 704 features and 80 observations. The data is a high dimension data.
+
+**2. Pick a property (`Moisture`, `Oil`, `Starch`, or `Protein`) to predict.**
+
+Moisture is pick as the outcome feature.
+
+**3. Split your data into a training (80%) and test (20%) set.**
+```{r}
+set.seed(9252568)
+
+# remove the unused features in the data
+corn <- corn %>%
+  select(-Oil, -Starch, -Protein)
+
+corn_samp <- corn[sample(nrow(corn)),] # reordering the data
+train <- seq(1, nrow(corn) * 0.8)
+test <- seq(max(train) + 1, nrow(corn))
+
+corn_train <- corn_samp[train,]
+corn_test <- corn_samp[test,]
+```
+
+**4. Use the function `plsr` from the package `pls` to estimate a partial least squares model, predicting the property using the NIR spectroscopy measurements in the training data.** Make sure that the features are on the same scale. Use leave-one-out cross-validation (built into plsr) to estimate out-of-sample performance.
+```{r}
+pls_model.1 <- plsr(Moisture ~.,
+                    data = corn_train,
+                    scale = T,
+                    center = T, # the default is to perform mean center
+                    validation = "LOO") 
+```
+
+**5. Find out which component best predicts the property you chose. Explain how you did this.**
+```{r}
+summary(pls_model.1)
+```
+
+This table allows us to determine the percentage of the variance of the response variable explained by the PLS component. The first PLS component offers the best prediction of the response variable, which explains 38.01% of the variation in `Moisture`.
+
+**6. Create a plot with on the x-axis the wavelength, and on the y-axis the strength of the loading for this component. Explain which wavelengths are most important for predicting the property you are interested in.**
+```{r}
+Wavelength <- names(corn_train)[-1] # extract the features
+Loading <- pls_model.1$loadings[1:700] # extract the loadings
+
+plot <- data.frame(Wavelength = as.numeric(Wavelength), Loading = Loading)
+
+plot %>%
+  ggplot(aes(x = Wavelength, y = Loading)) +
+  geom_line() +
+  scale_x_continuous(n.breaks = 20) +
+  theme_classic()
+```
+
+As can be seen from the plot, the wavelengths between approximately 1450 and 1600 are the most important for predicting Moisture, as this range holds the most powerful loading values.
+
+**7. Pick the number of components included in the model based on the “one standard deviation” rule (`selectNcomp()`). Create predictions for the test set using the resulting model.**
+```{r}
+#??selectNcomp
+selectNcomp(pls_model.1, 
+            method = "onesigma") # one standard deviation
+
+# predict the test set using the resulting model
+pred_pls_test <- predict(pls_model.1, newdata = corn_test,
+        ncomp = 8)
+```
+
+**8. Compare your PLS predictions to a LASSO linear regression model where lambda is selected based on cross-validation with the one standard deviation rule (using `cv.glmnet`).**
+```{r}
+# first extract the predictors and outcome variable, then make the data as matrix
+x_train <- corn_train %>%
+  select(-Moisture)
+x_train <- as.matrix(x_train)
+
+y_train <- corn_train %>%
+  select(Moisture)
+y_train <- as.matrix(y_train)
+
+x_test <- corn_test %>%
+  select(-Moisture)
+x_test <- as.matrix(x_test)
+
+y_test <- corn_test %>%
+  select(Moisture)
+y_test <- as.matrix(y_test)
+```
+
+Now, fit the model on training data:
+```{r}
+lasso_model.1 <- cv.glmnet(x = x_train,
+                           y = y_train,
+                           nfold = 10, # default
+                           family = "gaussian",
+                           alpha = 1)
+```
+
+And predict the test set using the LASSO model,
+```{r}
+pred_lasso_test <- predict(lasso_model.1, newx = x_test, "lambda.min")
+```
+
+We use MSE to compare the two models, i.e., PLS model and LASSO model:
+```{r}
+# create a function for computing MSE
+mse <- function(y_true, y_pred){
+  mse = mean((y_true - y_pred)^2)
+  return(mse)
+}
+
+# MSE of PLS model
+PLS_MSE <- mse(y_true = corn_test$Moisture, y_pred = pred_pls_test)
+
+PLS_MSE
+
+# MSE of LASSO model
+LASSO_MSE <- mse(y_true = corn_test$Moisture, y_pred = pred_lasso_test)
+
+LASSO_MSE
+```
+
+As the MSE of the PLS model is lower than that of the LASSO model, the PLS model possesses better performance in our case.
